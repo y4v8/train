@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -11,11 +13,61 @@ import (
 )
 
 func main() {
-	places := []int{13, 15, 17, 19, 21, 23}
-	monitor("Константиновка", "Киев", "126О", "П", "2018-04-28", places, 60*time.Second)
+	args, err := getArgs()
+	if err != nil {
+		fmt.Println("Usage:")
+		flag.PrintDefaults()
+		return
+	}
+	monitor(args.fromName, args.toName, args.trainNumber, args.wagonTypeID, args.date, args.intPlaces, 60*time.Second)
+}
+
+type Args struct {
+	fromName    string
+	toName      string
+	trainNumber string
+	wagonTypeID string
+	date        string
+	strPlaces   string
+	intPlaces   []int
+}
+
+func getArgs() (*Args, error) {
+	var args Args
+
+	flag.StringVar(&args.fromName, "from", "", "Марганец")
+	flag.StringVar(&args.toName, "to", "", "Харьков")
+	flag.StringVar(&args.trainNumber, "train", "", "074О")
+	flag.StringVar(&args.wagonTypeID, "type", "", "П")
+	flag.StringVar(&args.date, "date", "", "2018-06-21")
+	flag.StringVar(&args.strPlaces, "places", "", "17,19 [not required]")
+	flag.Parse()
+
+	if args.fromName == "" || args.toName == "" || args.trainNumber == "" || args.wagonTypeID == "" || args.date == "" {
+		return nil, errors.New("Bad arguments")
+	}
+
+	strPlaces := strings.Split(args.strPlaces, ",")
+	args.intPlaces = make([]int, 0, len(strPlaces))
+	for _, s := range strPlaces {
+		if s == "" {
+			continue
+		}
+
+		intPlace, err := strconv.Atoi(s)
+		if err != nil {
+			return nil, errors.New("Bad arguments")
+		}
+
+		args.intPlaces = append(args.intPlaces, intPlace)
+	}
+
+	return &args, nil
 }
 
 func monitor(fromName, toName, trainNumber, wagonTypeID, date string, places []int, repeatTime time.Duration) {
+	log.Printf("[%v] %v->%v %v %v %v\n", trainNumber, fromName, toName, wagonTypeID, date, places)
+
 	api := train.NewApi()
 
 	from, err := getStation(api, fromName)
@@ -58,8 +110,14 @@ func printFreePlaceWagons(api *train.Api, paramsTrainWagons train.ParamsTrainWag
 			WagonType: paramsTrainWagons.WagonTypeID,
 		}
 
+		freePlaces := "[Free] "
+		for _, wagonType := range dataTrainWagons.Types {
+			freePlaces += wagonType.TypeID + ":" + strconv.Itoa(wagonType.Free) + " "
+		}
+		log.Println(freePlaces)
+
 		for _, wagon := range dataTrainWagons.Wagons {
-			if wagon.Free > 0 {
+			if wagon.TypeID == paramsTrainWagons.WagonTypeID && wagon.Free > 0 {
 				paramsTrainWagon.WagonNum = wagon.Num
 				paramsTrainWagon.WagonClass = wagon.Class
 				exists = printFreePlaceWagon(api, paramsTrainWagon, wagon.Free, places)
@@ -88,6 +146,11 @@ func printFreePlaceWagon(api *train.Api, paramsTrainWagon train.ParamsTrainWagon
 						exists = true
 						freePlaces = append(freePlaces, place)
 					}
+				}
+
+				if len(places) == 0 {
+					exists = true
+					freePlaces = append(freePlaces, place)
 				}
 			}
 			log.Printf("wagon:%v, free:%v, places:%v", paramsTrainWagon.WagonNum, free, strings.Join(freePlaces, ","))
